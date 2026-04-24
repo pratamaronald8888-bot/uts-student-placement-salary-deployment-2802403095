@@ -2,20 +2,35 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-import requests
 import streamlit as st
 
-CLASSIFICATION_MODEL_PATH = Path("artifacts/student_placement_classifier.pkl")
-REGRESSION_MODEL_PATH = Path("artifacts/student_salary_regressor.pkl")
+CLASSIFICATION_MODEL_CANDIDATES = [
+    Path("artifacts/student_placement_classifier.pkl"),
+    Path("student_placement_classifier.pkl"),
+]
+REGRESSION_MODEL_CANDIDATES = [
+    Path("artifacts/student_salary_regressor.pkl"),
+    Path("student_salary_regressor.pkl"),
+]
+
+
+def resolve_model_path(candidates):
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
 
 
 def predict_locally(data):
-    if not CLASSIFICATION_MODEL_PATH.exists() or not REGRESSION_MODEL_PATH.exists():
+    classification_model_path = resolve_model_path(CLASSIFICATION_MODEL_CANDIDATES)
+    regression_model_path = resolve_model_path(REGRESSION_MODEL_CANDIDATES)
+
+    if classification_model_path is None or regression_model_path is None:
         st.error("Model belum ada. Jalankan `python pipeline_student.py` dulu.")
         return None
 
-    classification_model = joblib.load(CLASSIFICATION_MODEL_PATH)
-    regression_model = joblib.load(REGRESSION_MODEL_PATH)
+    classification_model = joblib.load(classification_model_path)
+    regression_model = joblib.load(regression_model_path)
     input_data = pd.DataFrame([data])
 
     return {
@@ -24,27 +39,11 @@ def predict_locally(data):
     }
 
 
-def predict_via_api(data, api_url):
-    classification_response = requests.post(f"{api_url}/predict/classification", json=data, timeout=15)
-    regression_response = requests.post(f"{api_url}/predict/regression", json=data, timeout=15)
-    classification_response.raise_for_status()
-    regression_response.raise_for_status()
-
-    result = classification_response.json()
-    result.update(regression_response.json())
-    return result
-
-
 def main():
     st.set_page_config(page_title="Student Model Deployment", layout="centered")
 
     st.title("Student Placement and Salary Prediction")
     st.subheader("Model Deployment")
-
-    mode = st.radio("Prediction Mode", ["Monolithic", "FastAPI Client"], horizontal=True)
-    api_url = "http://127.0.0.1:8000"
-    if mode == "FastAPI Client":
-        api_url = st.text_input("FastAPI URL", "http://127.0.0.1:8000").rstrip("/")
 
     gender = st.selectbox("gender", ["Male", "Female"])
     branch = st.selectbox("branch", ["CSE", "IT", "ECE", "ME", "Civil"])
@@ -95,12 +94,7 @@ def main():
     }
 
     if st.button("Make Prediction"):
-        try:
-            result = predict_locally(data) if mode == "Monolithic" else predict_via_api(data, api_url)
-        except requests.RequestException as exc:
-            st.error(f"API request gagal: {exc}")
-            return
-
+        result = predict_locally(data)
         if result:
             st.success("Prediction completed")
             st.write(f"Placement Prediction: **{result['placement_status']}**")
